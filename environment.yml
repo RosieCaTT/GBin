@@ -9,8 +9,7 @@
 # RAPIDS<->TensorFlow/CUDA conflicts. (Want the opt-in `--cluster leiden` path?
 # add cuml+cugraph afterwards -- see "Optional: RAPIDS" at the bottom.)
 #
-#   # Use mamba/libmamba -- the classic conda solver is very slow on this stack:
-#   mamba env create -f environment.yml          # or: conda env create -f ...
+#   conda env create -f environment.yml
 #   conda activate gbin
 #   # Blackwell GPUs: if the conda pytorch build does not yet ship sm_120
 #   # kernels, replace it with the official cu128 wheel:
