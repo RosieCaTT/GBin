@@ -1,0 +1,15 @@
+numpy>=1.24
+torch>=2.4
+pyfastx>=2.0
+loguru>=0.7
+tqdm>=4.60
+
+[bam]
+pycoverm>=0.6
+
+[dev]
+pytest>=7.0
+
+[markers]
+pyrodigal>=3.0
+pyhmmer>=0.10

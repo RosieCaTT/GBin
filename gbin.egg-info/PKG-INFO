@@ -1,0 +1,228 @@
+Metadata-Version: 2.4
+Name: GBin
+Version: 0.1.0
+Summary: Ultra-fast GPU-accelerated metagenomic binning (hybrid self-supervised VAE + single-copy marker refinement)
+Author: Ruochen Chao
+License: MIT
+Project-URL: Homepage, https://github.com/RosieCaTT/GBin
+Project-URL: Repository, https://github.com/RosieCaTT/GBin.git
+Project-URL: Issues, https://github.com/RosieCaTT/GBin/issues
+Keywords: metagenomics,binning,GPU,CUDA,VAE,MAG,bioinformatics
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: GPU :: NVIDIA CUDA
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Scientific/Engineering :: Bio-Informatics
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy>=1.24
+Requires-Dist: torch>=2.4
+Requires-Dist: pyfastx>=2.0
+Requires-Dist: loguru>=0.7
+Requires-Dist: tqdm>=4.60
+Provides-Extra: markers
+Requires-Dist: pyrodigal>=3.0; extra == "markers"
+Requires-Dist: pyhmmer>=0.10; extra == "markers"
+Provides-Extra: bam
+Requires-Dist: pycoverm>=0.6; extra == "bam"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Dynamic: license-file
+
+# GBin — Ultra-fast GPU-accelerated metagenomic binning
+
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/platform-WSL2%20%7C%20Linux%20%2B%20NVIDIA-orange)
+![Tests](https://img.shields.io/badge/tests-81%20passing-brightgreen)
+
+**GBin** recovers genomes (metagenome-assembled genomes, MAGs) from metagenomic
+assembly contigs. It is a **hybrid** binner that runs the heavy lifting on a
+single consumer GPU:
+
+- a self-supervised **variational autoencoder (VAE)** embeds contigs from
+  tetranucleotide composition + per-sample abundance;
+- **single-copy marker genes** (pyrodigal + pyhmmer) add cannot-link constraints
+  and decontaminate bins;
+- the latent space is clustered **on the GPU** — a robust pure-PyTorch iterative
+  medoid by default, with optional cuGraph Leiden;
+- optional **[CheckM2](https://github.com/chklovski/CheckM2)** integration for
+  accurate final QC and **CheckM2-guided decontamination**.
+
+It is inspired by [VAMB](https://github.com/RasmussenLab/vamb) (VAE + iterative
+medoid clustering) and [SemiBin2](https://github.com/BigDataBiology/SemiBin)
+(self-supervised learning + marker constraints), and pushes more of the pipeline
+onto the GPU: k-mer counting, mixed-precision (bf16) training, and graph
+clustering.
+
+> Status: actively developed; the full pipeline is implemented and covered by an
+> 81-test CPU suite. GPU/RAPIDS paths are validated on WSL2 + NVIDIA.
+
+## Highlights
+
+- **GPU end-to-end** — k-mer counting, VAE training (bf16), clustering, and the
+  decontamination splitter all run on the GPU; no GPU is *required* (everything
+  also runs on CPU), but it is built for one.
+- **Maps reads for you** — point gbin at FASTQ reads and it runs strobealign /
+  minimap2 to compute coverage; or feed it BAMs or precomputed `--aemb` TSVs.
+- **Two quality estimators** — a fast built-in single-copy-gene scorer that runs
+  during binning, plus opt-in CheckM2 for accurate, publishable numbers.
+- **CheckM2-guided refinement** — split the bins CheckM2 flags as contaminated
+  (on the GPU) and keep a split only if CheckM2 confirms it actually improves
+  quality.
+- **Cached stages** — composition, mapping, abundance, markers, and the latent
+  are cached, so re-running with different model/clustering settings is cheap.
+
+## Requirements
+
+- **OS/GPU:** WSL2 or Linux with an NVIDIA GPU. Developed on an RTX 5070 Ti
+  (16 GB, Blackwell / sm_120, CUDA 12.8); works on any CUDA GPU, and on CPU
+  (slowly). Memory budget: < 16 GB VRAM, < 32 GB RAM for typical assemblies.
+- **Python** ≥ 3.10 (the conda env uses 3.12).
+- **External tools** (installed by `environment.yml`): strobealign / minimap2 /
+  samtools (read mapping), and optionally CheckM2 (final QC).
+
+## Installation
+
+The recommended setup is a single conda env (no RAPIDS, so it solves fast and
+includes CheckM2). **Use `mamba`/libmamba** — the classic conda solver is slow on
+bioinformatics stacks.
+
+```bash
+git clone https://github.com/RosieCaTT/GBin.git && cd GBin
+mamba env create -f environment.yml        # or: conda env create -f environment.yml
+conda activate gbin
+# Blackwell GPUs need CUDA 12.8+; if the bundled torch lacks sm_120 kernels:
+pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu128
+pip install -e .
+checkm2 database --download                # one-time ~3 GB CheckM2 DB (optional, for --checkm2)
+```
+
+The default clusterer (`medoid`) needs no RAPIDS. For the optional `--cluster
+leiden` fast path, add cuML + cuGraph afterwards (see
+[docs/install.md](docs/install.md) §2.3). Full setup, the manual recipe, a
+separate-env CheckM2 fallback, and troubleshooting are in
+[docs/install.md](docs/install.md).
+
+## Quick start
+
+Abundance (coverage) is the strongest binning signal. If you have **reads**, gbin
+maps them for you — nothing to precompute:
+
+```bash
+# One sample's paired reads
+gbin bin -i contigs.fna.gz --reads s1_R1.fq.gz,s1_R2.fq.gz -o gbin_out
+
+# Multiple samples (best results) — repeat --reads, or use a manifest TSV.
+# Mapping ALL samples to the assembly gives strong co-abundance signal and is the
+# single biggest lever for separating closely related genomes.
+gbin bin -i contigs.fna.gz \
+    --reads s1_R1.fq.gz,s1_R2.fq.gz \
+    --reads s2_R1.fq.gz,s2_R2.fq.gz \
+    -o gbin_out
+gbin bin -i contigs.fna.gz --reads-tsv samples.tsv -o gbin_out   # name<TAB>R1<TAB>R2 per line
+
+# Long reads (Nanopore/PacBio)
+gbin bin -i contigs.fna.gz --reads ont.fq.gz --mapper minimap2 --mapper-preset map-ont -o gbin_out
+
+# Accurate final QC + CheckM2-guided decontamination
+gbin bin -i contigs.fna.gz --reads-tsv samples.tsv -o gbin_out --checkm2-refine
+```
+
+Already have coverage? Skip mapping:
+
+```bash
+gbin bin -i contigs.fna.gz -a aemb/*.tsv -o gbin_out     # strobealign --aemb TSVs
+gbin bin -i contigs.fna.gz --bamdir bams/ -o gbin_out    # sorted BAM files
+```
+
+## How it works
+
+```
+reads ─ map (strobealign --aemb │ minimap2) ─→ coverage           io/mapping.py
+FASTA ─ composition (GPU k-mers) ─────────────→ TNF [N,103]        features/composition.py
+      ─ abundance (reads │ BAM │ aemb TSV) ───→ cov  [N,S]         io/abundance.py
+      ─ markers (pyrodigal + pyhmmer) ────────→ SCGs / contig      markers/find.py
+normalize (GPU) → VAE (bf16) → latent [N,32]                       features/, model/
+cluster (medoid │ cuGraph Leiden) → labels                        cluster/
+refine (SCG split) [+ CheckM2-guided split] → write bins + report cluster/refine.py, qc/, io/write.py
+```
+
+## Bin quality & CheckM2
+
+gbin reports two estimates of completeness / contamination:
+
+- **Built-in (on by default with markers):** counts ~104 universal single-copy
+  genes. Fast enough to run *inside* the decontamination loop and as a quick flag
+  in `bins_info.tsv`. It is a coarse heuristic and can under-estimate
+  contamination.
+- **CheckM2 (opt-in, accurate):** an ML-based estimate. Add `--checkm2` to
+  `gbin bin`, or run it later on an existing output:
+
+  ```bash
+  gbin qc -o gbin_out                       # CheckM2 on gbin_out/bins
+  ```
+
+  Numbers are merged into `bins_info.tsv` as `checkm2_completeness` /
+  `checkm2_contamination` (next to the built-in columns); the native report is
+  saved under `gbin_out/checkm2/`. CheckM2 ships in the same conda env; or keep it
+  separate and pass `--checkm2-bin /path/to/checkm2`.
+
+- **CheckM2-guided refinement (opt-in):** `--checkm2-refine` (or `gbin qc -o
+  gbin_out --refine -i contigs.fna.gz`) splits the bins CheckM2 flags as
+  contaminated, trying several GPU KMeans partitions per bin, and **keeps a split
+  only if CheckM2 confirms it improves the DAS-Tool score**
+  (`completeness − 5·contamination`) by a margin — so cosmetic "peel one contig"
+  splits are rejected. It recurses into still-contaminated children. The split
+  math runs on the GPU; CheckM2 itself is CPU-bound (DIAMOND), so this is slower
+  than plain `--checkm2`. After refinement the native report under `checkm2/` is
+  rewritten to match the final bins. Tune with `--checkm2-refine-min-contamination`,
+  `--checkm2-refine-min-gain`, `--checkm2-refine-max-k`, `--checkm2-refine-iters`.
+
+> Tip: a heavily contaminated bin that won't split is usually two genomes that
+> overlap in the latent space. The most effective fix is **more samples** — co-
+> abundance across samples separates them far better than any post-hoc split.
+
+## Outputs
+
+In `gbin_out/`:
+
+| Path | Contents |
+|------|----------|
+| `bins/*.fna` | one FASTA per bin |
+| `bins_info.tsv` | per-bin completeness / contamination / size / N50 (+ `checkm2_*` if run) |
+| `contig_bins.tsv` | contig → bin assignment |
+| `checkm2/` | CheckM2's native report (if `--checkm2*`) |
+| `cache/` | cached composition / mapping / abundance / markers / latent |
+
+## Subcommands
+
+`gbin bin` runs the whole pipeline. Individual stages (each cached) are also
+exposed: `composition`, `abundance`, `markers`, `cluster`, and `qc` (CheckM2 on an
+existing output). Run `gbin <cmd> --help` for options.
+
+## Tests
+
+```bash
+pytest tests -q          # 81 CPU tests (synthetic data; CheckM2/mappers mocked)
+```
+
+The GPU/RAPIDS code paths run on `device='cpu'` in tests, so correctness is
+covered on any machine; only raw GPU speed/VRAM needs a real card to observe.
+
+## Citation
+
+If gbin is useful in your work, please cite it (see [CITATION.cff](CITATION.cff))
+and the tools it builds on: VAMB, SemiBin2, CheckM2, pyrodigal, and pyhmmer.
+
+## License
+
+[MIT](LICENSE) © Ruochen Chao.
+
+GBin reuses two data assets from **VAMB** (MIT): the 256→103 TNF projection kernel
+(`gbin/data/kernel.npz`) and the single-copy marker HMM set (`gbin/data/marker.hmm`).
+It also builds on the ideas and ecosystems of SemiBin2, CheckM2, pyrodigal, and
+pyhmmer — thanks to their authors.
