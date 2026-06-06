@@ -57,7 +57,7 @@ The recommended setup is a single conda env.
 
 ```bash
 git clone https://github.com/RosieCaTT/GBin.git && cd GBin
-mamba env create -f environment.yml        # or: conda env create -f environment.yml
+conda env create -f environment.yml
 conda activate gbin
 # Blackwell GPUs need CUDA 12.8+; if the bundled torch lacks sm_120 kernels:
 pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu128
