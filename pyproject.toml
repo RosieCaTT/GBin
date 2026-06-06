@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "GBin"
+version = "0.1.0"
+description = "Ultra-fast GPU-accelerated metagenomic binning (hybrid self-supervised VAE + single-copy marker refinement)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Ruochen Chao" }]
+keywords = ["metagenomics", "binning", "GPU", "CUDA", "VAE", "MAG", "bioinformatics"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+# Core dependencies installable with pip. The GPU clustering stack (RAPIDS:
+# cuml, cugraph) is conda-only and lives in environment.yml; gbin runs without
+# it by falling back to a pure-PyTorch medoid clusterer.
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.4",
+    "pyfastx>=2.0",
+    "loguru>=0.7",
+    "tqdm>=4.60",
+]
+
+[project.urls]
+Homepage = "https://github.com/RosieCaTT/GBin"
+Repository = "https://github.com/RosieCaTT/GBin.git"
+Issues = "https://github.com/RosieCaTT/GBin/issues"
+
+[project.optional-dependencies]
+# Single-copy marker genes for the hybrid loss / decontamination (pure-Python,
+# pip-installable, no external binaries needed).
+markers = ["pyrodigal>=3.0", "pyhmmer>=0.10"]
+# Read coverage directly from BAM files (alternative: pre-computed aemb TSVs).
+bam = ["pycoverm>=0.6"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+gbin = "gbin.cli:main"
+
+[tool.setuptools]
+packages = [
+    "gbin",
+    "gbin.io",
+    "gbin.features",
+    "gbin.markers",
+    "gbin.model",
+    "gbin.cluster",
+    "gbin.qc",
+]
+
+[tool.setuptools.package-data]
+gbin = ["data/*.npz", "data/*.hmm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

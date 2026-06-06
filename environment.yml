@@ -1,0 +1,70 @@
+# Conda environment for gbin (GPU-accelerated metagenomic binning).
+#
+# Target: WSL2 / Linux with an NVIDIA GPU. Tuned for Blackwell (RTX 5070 Ti,
+# sm_120), which needs CUDA 12.8+ and a recent PyTorch build.
+#
+# This is the RAPIDS-free single env: PyTorch (GPU) + read mappers + markers +
+# CheckM2, all in one. gbin's default clusterer is the pure-torch `medoid`, so
+# RAPIDS is NOT needed -- leaving it out keeps the conda solve fast and avoids the
+# RAPIDS<->TensorFlow/CUDA conflicts. (Want the opt-in `--cluster leiden` path?
+# add cuml+cugraph afterwards -- see "Optional: RAPIDS" at the bottom.)
+#
+#   # Use mamba/libmamba -- the classic conda solver is very slow on this stack:
+#   mamba env create -f environment.yml          # or: conda env create -f ...
+#   conda activate gbin
+#   # Blackwell GPUs: if the conda pytorch build does not yet ship sm_120
+#   # kernels, replace it with the official cu128 wheel:
+#   pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu128
+#   pip install -e .
+#   checkm2 database --download                  # one-time ~3 GB CheckM2 DB
+name: gbin
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12        # >=3.12 (CheckM2 needs it; fine for gbin/torch too)
+  - pip
+
+  # --- read mappers (abundance from reads) ---
+  - strobealign>=0.13   # short-read abundance (--aemb), recommended
+  - minimap2>=2.26      # long reads (Nanopore/PacBio)
+  - samtools>=1.18      # coverage from minimap2 output
+
+  # --- features / coverage / markers (all CPU, cross-platform) ---
+  - pyrodigal>=3.0
+  - pyhmmer>=0.10
+  - pycoverm>=0.6
+  - pyfastx>=2.0
+
+  # --- final QC: CheckM2 in the SAME env as gbin (--checkm2 / --checkm2-refine) ---
+  # CheckM2 pulls TensorFlow (its neural-network completeness model). gbin runs
+  # CheckM2 as a subprocess with CUDA_VISIBLE_DEVICES="" (see qc/checkm2.py), so
+  # TF never touches the GPU and never fights torch for VRAM -- the whole GPU
+  # stays gbin's, and CheckM2's bottleneck (DIAMOND) is CPU anyway. The `=*=cpu*`
+  # build keeps the solve lean (no CUDA-variant TF libraries); drop that pin if
+  # your solver can't satisfy it -- the runtime guard makes it safe either way.
+  # If even this won't solve on your platform, use the separate-env recipe in
+  # docs/install.md and point gbin at it with --checkm2-bin.
+  - checkm2 >=1.0.2
+  - tensorflow=*=cpu*
+  - diamond >=2.1
+
+  # --- utils ---
+  - numpy>=1.24
+  - loguru>=0.7
+  - tqdm>=4.60
+  - pytest
+
+  - pip:
+      # PyTorch with the CUDA build matching your driver (the primary torch source
+      # now that RAPIDS is out of this env). For Blackwell use the cu128 index.
+      - --extra-index-url=https://download.pytorch.org/whl/cu128
+      - torch>=2.6
+      - -e .
+
+# --- Optional: RAPIDS (only for the opt-in `--cluster leiden` fast path) ---
+# Do NOT add these here (it re-introduces the slow/conflict-prone combined solve).
+# Install them into this env *afterwards*, in their own step, picking a RAPIDS
+# release that matches your CUDA/GPU (verify Blackwell support):
+#   conda install -c rapidsai -c conda-forge -c nvidia cuml cugraph 'cuda-version=12.8'
+# gbin auto-falls-back to medoid if RAPIDS is absent or fails, so this is optional.

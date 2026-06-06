@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use GBin in your research, please cite it as below."
+title: "GBin: Ultra-fast GPU-accelerated metagenomic binning"
+abstract: >-
+  GBin is a hybrid, GPU-accelerated metagenomic binner. A self-supervised
+  variational autoencoder embeds contigs from tetranucleotide composition and
+  per-sample abundance; single-copy marker genes add cannot-link constraints and
+  decontaminate bins; the latent space is clustered on the GPU. CheckM2 can be
+  used for accurate final QC and for guided decontamination of contaminated bins.
+type: software
+authors:
+  - given-names: Ruochen
+    family-names: Chao
+version: "0.1.0"
+date-released: "2026-06-06"
+license: MIT
+repository-code: "https://github.com/RosieCaTT/GBin.git"
+url: "https://github.com/RosieCaTT/GBin"
+keywords:
+  - metagenomics
+  - genome binning
+  - metagenome-assembled genomes
+  - variational autoencoder
+  - GPU
+  - CUDA
+  - bioinformatics
